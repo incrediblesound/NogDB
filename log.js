@@ -12,7 +12,6 @@ program
   .option('-n, --new-topic <name>', 'create a new topic')
   .option('-f, --folder <path>', 'set folder for data')
   .option('-g, --get <id>', 'get a message by id')
-  // .option('-l, --load <name>', 'load a database')
   .option('-p, --publish <message>', 'send a message')
   .option('-r, --regex <regex>', 'filter with regex')
   .option('-s, --page-size <size>', 'set page size')
