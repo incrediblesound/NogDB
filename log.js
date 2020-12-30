@@ -14,6 +14,7 @@ program
   .option('-g, --get <id>', 'get a message by id')
   // .option('-l, --load <name>', 'load a database')
   .option('-p, --publish <message>', 'send a message')
+  .option('-r, --regex <regex>', 'filter with regex')
   .option('-s, --page-size <size>', 'set page size')
   .option('-t, --topic <name>', 'specify the topic')
   .option('-D, --delete <name>', 'delete a topic')
@@ -55,6 +56,11 @@ if (program.get) {
     })
 }
 
-if (program.delete) {
-  
+if (program.regex) {
+  const topic = program.topic;
+  const regex = program.regex;
+  return axios.get(`http://localhost:3000/filter/${topic}?regex=${regex}`)
+    .then(response => {
+      console.log(response.data)
+    })
 }

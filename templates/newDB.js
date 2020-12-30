@@ -2,7 +2,7 @@ const newDatabase = (name, pageSize, folder) => (
 `{
   "name": "${name}",
   "activePage": 0,
-  "lastIndex": 0,
+  "lastIndex": -1,
   "pageSize": ${pageSize},
   "folder": "${folder}"
 }

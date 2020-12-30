@@ -43,6 +43,26 @@ const decodeMessage = msg => msg;
 
 const getPageFileName = (topicMeta, index) => `./data/${topicMeta.folder}/` + pageFile(index);
 const getMapFileName = (topicMeta, index) => `./data/${topicMeta.folder}/`+ pageMap(index);
+const getParsedMap = mapFileName => JSON.parse(fs.readFileSync(mapFileName).toString());
+
+const scanPage = (pageIndex, map, page, topicMeta, regex) => {
+  let currentIndex = pageIndex * topicMeta.pageSize
+  let end = currentIndex + topicMeta.pageSize
+  if (pageIndex === topicMeta.activePage) {
+    end = topicMeta.lastIndex;
+  }
+  let expression = regex ? new RegExp(regex) : null;
+  const result = []
+  while(currentIndex < end){
+    const messageSpan = map[currentIndex]
+    const message = page.substring(messageSpan.start, messageSpan.end)
+    if (!expression || (expression && expression.test(message))) {
+      result.push(message)
+    }
+    currentIndex += 1;
+  }
+  return result;
+}
 
 app.post('/publish', (req, res) => {
   const topic = req.body.topic;
@@ -50,7 +70,7 @@ app.post('/publish', (req, res) => {
   const topicMeta = getTopicMeta(topic)
   const pageFileName = getPageFileName(topicMeta, topicMeta.activePage)
   const mapFileName = getMapFileName(topicMeta, topicMeta.activePage)
-  const map = JSON.parse(fs.readFileSync(mapFileName).toString());
+  const map = getParsedMap(mapFileName)
 
   const index = topicMeta.lastIndex + 1;
   let start, end;
@@ -74,10 +94,10 @@ app.post('/publish', (req, res) => {
 app.get('/message/:topic/:id', (req, res) => {
   const { topic, id } = req.params;
   const topicMeta = getTopicMeta(topic)
-  const index = Math.floor(id / topicMeta.pageSize)
-  const pageFileName = getPageFileName(topicMeta, index)
-  const mapFileName = getMapFileName(topicMeta, index)
-  const map = JSON.parse(fs.readFileSync(mapFileName).toString());
+  const pageIndex = Math.floor(id / topicMeta.pageSize)
+  const pageFileName = getPageFileName(topicMeta, pageIndex)
+  const mapFileName = getMapFileName(topicMeta, pageIndex)
+  const map = getParsedMap(mapFileName)
   const { start, end } = map[id];
   const page = fs.readFileSync(pageFileName).toString()
   const message = page.substring(start, end)
@@ -90,6 +110,22 @@ app.post('/new-topic', (req, res) => {
   writePageFiles(folder, 0)
   fs.writeFileSync(metaFileName(topicName), newDatabase(topicName, pageSize, folder))
   res.end(JSON.stringify(1))
+})
+
+app.get('/filter/:topic', (req, res) => {
+  const { topic } = req.params;
+  const { regex } = req.query
+  const topicMeta = getTopicMeta(topic)
+  let result = []
+  for(let i = 0; i <= topicMeta.activePage; i++){
+    const mapFileName = getMapFileName(topicMeta, i)
+    const pageFileName = getPageFileName(topicMeta, i)
+    const map = getParsedMap(mapFileName)
+    const page = fs.readFileSync(pageFileName).toString()
+    const pageResult = scanPage(i, map, page, topicMeta, regex)
+    result = result.concat(pageResult)
+  }
+  res.end(JSON.stringify(result))
 })
 
 app.listen(port, () => {
