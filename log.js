@@ -1,7 +1,4 @@
 const fs = require('fs');
-const { flushData } = require('./store');
-const { newDatabase } = require('./templates/newDB')
-const { pageFile, pageMap } = require('./templates/page')
 const axios = require('axios');
 
 const { Command } = require('commander');

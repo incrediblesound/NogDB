@@ -3,7 +3,7 @@ const fs = require('fs')
 
 const { pageFile, pageMap } = require('./templates/page')
 const { mapEntry } = require('./templates/map')
-const { flushData, readChunk } = require('./store')
+const { flushData } = require('./store')
 const { metaFileName, newDatabase } = require('./templates/newDB')
 
 const app = configureApp();
