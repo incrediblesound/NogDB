@@ -38,6 +38,9 @@ if (program.newTopic) {
 if (program.publish) {
   const message = program.publish;
   const topic = program.topic;
+  if (!topic) {
+    throw new Error('must specify topic with -t')
+  }
   return axios.post('http://localhost:3000/publish', { message, topic })
     .then(response => {
       if (response.data !== 1) {
@@ -62,4 +65,12 @@ if (program.regex) {
     .then(response => {
       console.log(response.data)
     })
+}
+
+if (program.delete) {
+  const topic = program.delete;
+  return axios.get(`http://localhost:3000/delete/${topic}`)
+  .then(response => {
+    console.log(response.data)
+  })
 }

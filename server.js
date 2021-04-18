@@ -10,32 +10,64 @@ const app = configureApp();
 const port = process.env.PORT || 3000
 
 const TOPIC_CACHE = {};
+
 const getTopicMeta = topicName => {
   if(TOPIC_CACHE[topicName]){
-    return TOPIC_CACHE[topicName];
+    return TOPIC_CACHE[topicName].topicMeta;
   } else {
     const metaBuffer = fs.readFileSync(metaFileName(topicName)).toString()
-    const metaData = JSON.parse(metaBuffer.toString())
-    TOPIC_CACHE[topicName] = metaData
+    const metaData = JSON.parse(metaBuffer)
+    TOPIC_CACHE[topicName] = {
+      writeBuffer: '',
+    }
+    TOPIC_CACHE[topicName].topicMeta = metaData
     return metaData;
   }
 }
+
+// const writeToBuffer = (topicMeta, message) => {
+//   let writeBuffer = TOPIC_CACHE[topicMeta.name].writeBuffer;
+//   writeBuffer += message;
+// }
+
+// const flushWriteCache = (topicMeta, cb) => {
+//   const writeBuffer = TOPIC_CACHE[topicMeta.name].writeBuffer;
+//   const pageFileName = getPageFileName(topicMeta, topicMeta.activePage)
+//   flushData(pageFileName, writeBuffer, () => {
+//     TOPIC_CACHE[topicMeta.name].writeBuffer = '';
+//     cb()
+//   })
+// }
 
 const writePageFiles = (folder, index) => {
   fs.writeFileSync(`./data/${folder}/${pageFile(index)}`, '')
   fs.writeFileSync(`./data/${folder}/${pageMap(index)}`, '{}')
 }
 
-const managePages = topicMeta => {
-  const nextPage = Math.floor((topicMeta.lastIndex + 1) / topicMeta.pageSize)
-  if (nextPage !== topicMeta.activePage) {
-    writePageFiles(topicMeta.folder, nextPage)
-    topicMeta.activePage = nextPage
-  }
+const writeDataToLog = (data, topicMeta, pageIndex) => {
+  flushData(getPageFileName(topicMeta, pageIndex), data, () => {
+    console.log('wrote data to log')
+  })
 }
 
-const writeTopicMeta = topicMeta => {
+// const managePages = (topicMeta, cb) => {
+//   const nextPage = Math.floor((topicMeta.lastIndex + 1) / topicMeta.pageSize)
+//   if (nextPage !== topicMeta.activePage) {
+//     flushWriteCache(topicMeta, () => {
+//       writePageFiles(topicMeta.folder, nextPage)
+//       topicMeta.activePage = nextPage
+//       cb(true)
+//     })
+//   }
+//   cb(false)
+// }
+
+const persistTopicMeta = topicMeta => {
   fs.writeFileSync(metaFileName(topicMeta.name), JSON.stringify(topicMeta), { flags: 'w' })
+}
+
+const persistMap = (mapFileName, map) => {
+  fs.writeFileSync(mapFileName, JSON.stringify(map), { flags: 'w' })
 }
 
 const encodeMessage = msg => msg;
@@ -43,21 +75,48 @@ const decodeMessage = msg => msg;
 
 const getPageFileName = (topicMeta, index) => `./data/${topicMeta.folder}/` + pageFile(index);
 const getMapFileName = (topicMeta, index) => `./data/${topicMeta.folder}/`+ pageMap(index);
-const getParsedMap = mapFileName => JSON.parse(fs.readFileSync(mapFileName).toString());
+const getParsedMap = (topicName, mapFileName, options={}) => {
+  // getTopicMeta should always be called before this to initialize the current cache
+  if (TOPIC_CACHE[topicName][mapFileName]){
+    return TOPIC_CACHE[topicName][mapFileName]
+  } else {
+    let map;
+    try {
+      map = JSON.parse(fs.readFileSync(mapFileName).toString());
+    } catch(e){
+      map = {}
+    }
+    // if we get here we know that the map file is for the next page
+    TOPIC_CACHE[topicName][mapFileName] = map;
+    return map;
+  }
+}
+
+const getMessageindex = (topicMeta, map, message) => {
+  const index = topicMeta.lastIndex + 1;
+  let start, end;
+  if (index === 0 || (index % topicMeta.pageSize) === 0) {
+    start = 0
+  } else {
+    start = map[index-1].end
+  }
+  end = start + message.length;
+  return { start, end, index }
+}
 
 const scanPage = (pageIndex, map, page, topicMeta, regex) => {
   let currentIndex = pageIndex * topicMeta.pageSize
-  let end = currentIndex + topicMeta.pageSize
+  let end = currentIndex + topicMeta.pageSize;
   if (pageIndex === topicMeta.activePage) {
     end = topicMeta.lastIndex;
   }
   let expression = regex ? new RegExp(regex) : null;
   const result = []
-  while(currentIndex < end){
+  while(currentIndex < (end-1)){
     const messageSpan = map[currentIndex]
     const message = page.substring(messageSpan.start, messageSpan.end)
     if (!expression || (expression && expression.test(message))) {
-      result.push(message)
+      result.push({ index: currentIndex, message })
     }
     currentIndex += 1;
   }
@@ -68,27 +127,20 @@ app.post('/publish', (req, res) => {
   const topic = req.body.topic;
   const message = encodeMessage(req.body.message)
   const topicMeta = getTopicMeta(topic)
-  const pageFileName = getPageFileName(topicMeta, topicMeta.activePage)
-  const mapFileName = getMapFileName(topicMeta, topicMeta.activePage)
-  const map = getParsedMap(mapFileName)
+  const pageIndex = Math.floor((topicMeta.lastIndex + 1) / topicMeta.pageSize)
+  const pageFileName = getPageFileName(topicMeta, pageIndex)
+  const mapFileName = getMapFileName(topicMeta, pageIndex)
+  const map = getParsedMap(topic, mapFileName, { create: true})
 
-  const index = topicMeta.lastIndex + 1;
-  let start, end;
-  if (index === 1 || (index % topicMeta.pageSize) === 0) {
-    start = 0
-  } else {
-    start = map[index-1].end
-  }
-  end = start + message.length;
+  const { start, end, index } = getMessageindex(topicMeta, map, message)
 
-  flushData(pageFileName, message, () => {
-    map[index] = mapEntry(start, end)
-    fs.writeFileSync(mapFileName, JSON.stringify(map), { flags: 'w' })
-    topicMeta.lastIndex = index
-    managePages(topicMeta)
-    writeTopicMeta(topicMeta)
-    res.end(JSON.stringify(1))
-  })
+  map[index] = mapEntry(start, end)
+  topicMeta.lastIndex = index
+  topicMeta.activePage = pageIndex
+  writeDataToLog(message, topicMeta, pageIndex)
+  persistTopicMeta(topicMeta)
+  persistMap(mapFileName, map)
+  res.end(JSON.stringify(1))
 })
 
 app.get('/message/:topic/:id', (req, res) => {
@@ -97,7 +149,7 @@ app.get('/message/:topic/:id', (req, res) => {
   const pageIndex = Math.floor(id / topicMeta.pageSize)
   const pageFileName = getPageFileName(topicMeta, pageIndex)
   const mapFileName = getMapFileName(topicMeta, pageIndex)
-  const map = getParsedMap(mapFileName)
+  const map = getParsedMap(topic, mapFileName)
   const { start, end } = map[id];
   const page = fs.readFileSync(pageFileName).toString()
   const message = page.substring(start, end)
@@ -120,12 +172,16 @@ app.get('/filter/:topic', (req, res) => {
   for(let i = 0; i <= topicMeta.activePage; i++){
     const mapFileName = getMapFileName(topicMeta, i)
     const pageFileName = getPageFileName(topicMeta, i)
-    const map = getParsedMap(mapFileName)
+    const map = getParsedMap(topic, mapFileName)
     const page = fs.readFileSync(pageFileName).toString()
     const pageResult = scanPage(i, map, page, topicMeta, regex)
     result = result.concat(pageResult)
   }
   res.end(JSON.stringify(result))
+})
+
+app.get('/delete/:topic', (req, res) => {
+
 })
 
 app.listen(port, () => {
