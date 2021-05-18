@@ -12,8 +12,8 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "build"
   },
-  "include": ["./"],
-  "exclude": ["node_modules", "data"]
+  "files": ["server.ts"]
 }

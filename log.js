@@ -2,7 +2,6 @@ const fs = require('fs');
 const axios = require('axios');
 
 const { Command } = require('commander');
-const { buildMap } = require('./prefixMap.js');
 const program = new Command();
 program.version('0.0.1');
 
@@ -65,7 +64,7 @@ if (program.regex) {
     .then(response => {
       console.log(response.data)
       const words = response.data.map(entry => entry.message)
-      console.log(buildMap(words))
+      console.log(words)
     })
 }
 
