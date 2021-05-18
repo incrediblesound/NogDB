@@ -1,73 +1,64 @@
-const configureApp = require('./configureApp')
-const fs = require('fs')
+import { TopicMeta } from "./topic_cache";
 
-const { pageFile, pageMap } = require('./templates/page')
-const { mapEntry } = require('./templates/map')
-const { flushData } = require('./store')
-const { metaFileName, newDatabase } = require('./templates/newDB')
+export {};
+
+import configureApp from './configureApp'
+import * as fs from 'fs'
+
+import { pageFile, pageMap } from './templates/page'
+import { mapEntry } from './templates/map'
+import { flushData, readChunk } from './store'
+import { metaFileName, newDatabase } from './templates/newDB'
+import { topicCache } from './topic_cache'
+import { prefixMap } from './prefixMap';
 
 const app = configureApp();
 const port = process.env.PORT || 3000
 
-const TOPIC_CACHE = {};
+const TOPIC_CACHE = topicCache();
 
-const getTopicMeta = topicName => {
+interface LogRecord {
+  index: number;
+  message: string;
+}
+
+const getTopicMeta: (topicName: string) => TopicMeta = topicName => {
   if(TOPIC_CACHE[topicName]){
     return TOPIC_CACHE[topicName].topicMeta;
   } else {
     const metaBuffer = fs.readFileSync(metaFileName(topicName)).toString()
     const metaData = JSON.parse(metaBuffer)
-    TOPIC_CACHE[topicName] = {
-      writeBuffer: '',
-    }
-    TOPIC_CACHE[topicName].topicMeta = metaData
+    TOPIC_CACHE[topicName] = { topicMeta: metaData }
     return metaData;
   }
 }
 
-// const writeToBuffer = (topicMeta, message) => {
-//   let writeBuffer = TOPIC_CACHE[topicMeta.name].writeBuffer;
-//   writeBuffer += message;
-// }
-
-// const flushWriteCache = (topicMeta, cb) => {
-//   const writeBuffer = TOPIC_CACHE[topicMeta.name].writeBuffer;
-//   const pageFileName = getPageFileName(topicMeta, topicMeta.activePage)
-//   flushData(pageFileName, writeBuffer, () => {
-//     TOPIC_CACHE[topicMeta.name].writeBuffer = '';
-//     cb()
-//   })
-// }
-
-const writePageFiles = (folder, index) => {
+const writePageFiles = (folder: string, index: number) => {
   fs.writeFileSync(`./data/${folder}/${pageFile(index)}`, '')
   fs.writeFileSync(`./data/${folder}/${pageMap(index)}`, '{}')
 }
 
-const writeDataToLog = (data, topicMeta, pageIndex) => {
+const writePrefixMap = (folder: string, map) => {
+  fs.writeFileSync(`./data/${folder}/prefixMap.json`, JSON.stringify(map))
+}
+
+const getPrefixMap = (folder: string) => {
+  const file = fs.readFileSync(`./data/${folder}/prefixMap.json`).toString();
+  return JSON.parse(file)
+}
+
+const writeDataToLog = (data: string, topicMeta: TopicMeta, pageIndex: number) => {
   flushData(getPageFileName(topicMeta, pageIndex), data, () => {
     console.log('wrote data to log')
   })
 }
 
-// const managePages = (topicMeta, cb) => {
-//   const nextPage = Math.floor((topicMeta.lastIndex + 1) / topicMeta.pageSize)
-//   if (nextPage !== topicMeta.activePage) {
-//     flushWriteCache(topicMeta, () => {
-//       writePageFiles(topicMeta.folder, nextPage)
-//       topicMeta.activePage = nextPage
-//       cb(true)
-//     })
-//   }
-//   cb(false)
-// }
-
-const persistTopicMeta = topicMeta => {
-  fs.writeFileSync(metaFileName(topicMeta.name), JSON.stringify(topicMeta), { flags: 'w' })
+const persistTopicMeta = (topicMeta: TopicMeta) => {
+  fs.writeFileSync(metaFileName(topicMeta.name), JSON.stringify(topicMeta), { flag: 'w' })
 }
 
-const persistMap = (mapFileName, map) => {
-  fs.writeFileSync(mapFileName, JSON.stringify(map), { flags: 'w' })
+const persistMap = (mapFileName: string, map) => {
+  fs.writeFileSync(mapFileName, JSON.stringify(map), { flag: 'w' })
 }
 
 const encodeMessage = msg => msg;
@@ -104,16 +95,17 @@ const getMessageindex = (topicMeta, map, message) => {
   return { start, end, index }
 }
 
-const scanPage = (pageIndex, map, page, topicMeta, regex) => {
+const scanPage = (pageIndex: number, map, page: string, topicMeta: TopicMeta, regex?: string) => {
   let currentIndex = pageIndex * topicMeta.pageSize
-  let end = currentIndex + topicMeta.pageSize;
+  let end = currentIndex + (topicMeta.pageSize - 1);
   if (pageIndex === topicMeta.activePage) {
     end = topicMeta.lastIndex;
   }
   let expression = regex ? new RegExp(regex) : null;
-  const result = []
-  while(currentIndex < (end-1)){
+  const result: LogRecord[] = []
+  while(currentIndex <= end){
     const messageSpan = map[currentIndex]
+    console.log(messageSpan)
     const message = page.substring(messageSpan.start, messageSpan.end)
     if (!expression || (expression && expression.test(message))) {
       result.push({ index: currentIndex, message })
@@ -121,6 +113,16 @@ const scanPage = (pageIndex, map, page, topicMeta, regex) => {
     currentIndex += 1;
   }
   return result;
+}
+
+const getById = (topicMeta: TopicMeta, id: number) => {
+  const pageIndex = Math.floor(id / topicMeta.pageSize)
+  const pageFileName = getPageFileName(topicMeta, pageIndex)
+  const mapFileName = getMapFileName(topicMeta, pageIndex)
+  const map = getParsedMap(topicMeta.name, mapFileName)
+  const { start, end } = map[id];
+  // const page = fs.readFileSync(pageFileName).toString()
+  return readChunk(pageFileName, start, end)
 }
 
 app.post('/publish', (req, res) => {
@@ -146,14 +148,9 @@ app.post('/publish', (req, res) => {
 app.get('/message/:topic/:id', (req, res) => {
   const { topic, id } = req.params;
   const topicMeta = getTopicMeta(topic)
-  const pageIndex = Math.floor(id / topicMeta.pageSize)
-  const pageFileName = getPageFileName(topicMeta, pageIndex)
-  const mapFileName = getMapFileName(topicMeta, pageIndex)
-  const map = getParsedMap(topic, mapFileName)
-  const { start, end } = map[id];
-  const page = fs.readFileSync(pageFileName).toString()
-  const message = page.substring(start, end)
-  res.end(JSON.stringify(message))
+  const message = getById(topicMeta, id)
+
+  res.end(JSON.stringify(message.toString()))
 })
 
 app.post('/new-topic', (req, res) => {
@@ -178,6 +175,32 @@ app.get('/filter/:topic', (req, res) => {
     result = result.concat(pageResult)
   }
   res.end(JSON.stringify(result))
+})
+
+app.get('/prefix/:topic', (req, res) => {
+  const { topic } = req.params;
+  const topicMeta = getTopicMeta(topic)
+  let result = {}
+  for(let i = 0; i <= topicMeta.activePage; i++){
+    const mapFileName = getMapFileName(topicMeta, i)
+    const pageFileName = getPageFileName(topicMeta, i)
+    const map = getParsedMap(topic, mapFileName)
+    const page = fs.readFileSync(pageFileName).toString()
+    const pageResult = scanPage(i, map, page, topicMeta)
+    prefixMap(pageResult, result)
+  }
+  writePrefixMap(topicMeta.folder, result)
+  res.end(JSON.stringify(result));
+})
+
+app.get('/prefix/:topic/:chunk', (req, res) => {
+  const { topic, chunk } = req.params;
+  console.log(chunk)
+  const topicMeta = getTopicMeta(topic)
+  const map = getPrefixMap(topicMeta.folder)
+  const ids = map[chunk]
+  const messages = ids.map(id => getById(topicMeta, id).toString())
+  res.end(JSON.stringify(messages))
 })
 
 app.get('/delete/:topic', (req, res) => {

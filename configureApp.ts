@@ -12,4 +12,4 @@ const configureApp = () => {
   return app
 }
 
-module.exports = configureApp
+export default configureApp

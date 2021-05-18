@@ -2,6 +2,7 @@ const fs = require('fs');
 const axios = require('axios');
 
 const { Command } = require('commander');
+const { buildMap } = require('./prefixMap.js');
 const program = new Command();
 program.version('0.0.1');
 
@@ -14,6 +15,8 @@ program
   .option('-s, --page-size <size>', 'set page size')
   .option('-t, --topic <name>', 'specify the topic')
   .option('-D, --delete <name>', 'delete a topic')
+  .option('-pr --prefix', 'add a prefix index')
+  .option('-gp --get-prefix <prefix>', 'get by a prefix')
 
 program.parse(process.argv);
 
@@ -61,12 +64,31 @@ if (program.regex) {
   return axios.get(`http://localhost:3000/filter/${topic}?regex=${regex}`)
     .then(response => {
       console.log(response.data)
+      const words = response.data.map(entry => entry.message)
+      console.log(buildMap(words))
     })
 }
 
 if (program.delete) {
   const topic = program.delete;
   return axios.get(`http://localhost:3000/delete/${topic}`)
+  .then(response => {
+    console.log(response.data)
+  })
+}
+
+if (program.prefix) {
+  const topic = program.topic;
+  return axios.get(`http://localhost:3000/prefix/${topic}`)
+  .then(response => {
+    console.log(response.data)
+  })
+}
+
+if (program.getPrefix) {
+  const topic = program.topic
+  const prefix = program.getPrefix
+  return axios.get(`http://localhost:3000/prefix/${topic}/${prefix}`)
   .then(response => {
     console.log(response.data)
   })
